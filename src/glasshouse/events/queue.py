@@ -62,3 +62,10 @@ class EventQueue:
 
     def pending_cognition_count(self) -> int:
         return sum(1 for item in self._items if item.cognition)
+
+    def export_world(self) -> list[tuple[int, int, WorldEvent]]:
+        return [
+            (item.sort_key[0], item.sort_key[1], item.event.model_copy(deep=True))
+            for item in self._items
+            if item.event is not None
+        ]

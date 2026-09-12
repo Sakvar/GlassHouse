@@ -1,41 +1,129 @@
 # GlassHouse
 
-Headless Social Simulator (Stage 0 prototype).
+Public Show Core: один общий сезон «Вилла», четыре персонажа, бесплатное
+голосование за обстоятельства и детерминированные события с recap.
 
-## Quick start
+## Запуск без LLM и базы данных
 
 ```bash
-# Start PostgreSQL + pgvector
-docker compose up -d
-
-# Install
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-
-# Run tests (CI-safe, uses ScriptedStubLLM)
-pytest tests/ -m "not evaluation"
-
-# Run 48h accelerated simulation
 python scripts/run_simulation.py --hours 48 --seed 42
-
-# Inspect agent state
-python scripts/inspect_agent.py --agent Max --show beliefs,claims,relationships
-
-# Event timeline
-python scripts/timeline.py --last 2h --filter gossip
-
-# Debug API
-uvicorn apps.api.main:app --reload
+pytest tests/ -m "not evaluation"
 ```
 
-## Architecture
+Один тик по умолчанию равен двум игровым часам: 48 часов — 24 тика.
+`--tick-minutes 30` меняет длительность. Неполный последний тик округляется
+вверх. Скрипт печатает события, причины, изменения отношений и следующий выбор.
+Это отдельный локальный сезон; он не управляет сезоном API.
 
-- **World Truth** → deterministic perception → **Knowledge** → structured **Claims** (with provenance) → **Beliefs**
-- LLM returns typed intents/appraisals only; simulation core validates and applies mutations
-- Event log is immutable; summaries and memories are derived data
-- Cognition is sequential and event-driven in Stage 0
+## Общий сезон через API
 
-## Evaluation (optional, requires API key)
+Запустите **один процесс** (без `--reload` и дополнительных workers):
 
 ```bash
-pytest tests/ -m evaluation
+uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
+
+Сезон создаётся при первом запросе. Зрители читают одно состояние; запросы
+голосования и тиков сериализованы. OpenAPI: <http://127.0.0.1:8000/docs>.
+
+```bash
+curl http://127.0.0.1:8000/public/season
+curl http://127.0.0.1:8000/public/goals
+
+# На свежем сезоне поддержать обсуждение разногласий в первом тике.
+curl -X POST http://127.0.0.1:8000/public/votes \
+  -H 'Content-Type: application/json' \
+  -d '{"viewer_id":"viewer-1","story_goal_id":"goal:1:conflict","tick":1,"influence_points":3}'
+
+# Завершить один тик; можно указать от 1 до 100.
+curl -X POST http://127.0.0.1:8000/public/dev/ticks \
+  -H 'Content-Type: application/json' -d '{"ticks":1}'
+
+curl 'http://127.0.0.1:8000/public/timeline?from_tick=0&limit=50'
+curl http://127.0.0.1:8000/public/goals
+```
+
+Для следующего голоса берите `id` и `tick` из актуального `/public/goals`.
+Публичные ответы содержат локаль, коды категорий/результатов и русский текст;
+скрытые цели, личные границы, нераскрытые факты и чужие viewer_id не выдаются.
+Recap включает причины, ссылки на события и фактические изменения отношений.
+
+## Правила сезона
+
+- Категории: `conversation`, `romance_opportunity`, `reveal_secret`, `conflict`,
+  `reconciliation`. Возможность раскрыть стартовый секрет исчезает после раскрытия.
+- На зрителя — **3 бесплатных influence points за предстоящий тик**, суммарно
+  по всем целям. Можно разделить их между целями. `votes` — сумма этих очков,
+  а не число уникальных зрителей. Отрицательные, дробные очки и устаревшие
+  голоса отклоняются без изменения журнала.
+- При голосах побеждает максимальная сумма; равенство разрешает SHA-256 от
+  seed, тика и id цели. Без голосов director выбирает по потребностям,
+  отношениям, личной цели дня, локации и недавним/незавершённым историям.
+- Выбор фиксируется в начале тика; остальные цели закрываются. После результата
+  и recap открывается следующий раунд. Все персонажи могут отказаться.
+- Свидание требует взаимных предпочтений и границ: оба допускают романтику,
+  друг друга и приватный разговор; у обоих достаточно доверия, симпатии и
+  влечения (по умолчанию 20/10/30). Сон, занятость и усталость учитываются.
+  Отказ — полноценный исход, без штрафа за несогласие. Романтический исход
+  этой версии ограничен безопасным свиданием или отказом.
+- Секрет раскрывается только из явного seed-факта. Полученные claims ссылаются
+  на исходный claim и собственное восприятие события; неполное подслушивание
+  не даёт персонажу достоверного полного знания.
+
+## Архитектура и воспроизведение
+
+Существующая цепочка сохранена:
+**World Truth → perception → Knowledge → Claims с provenance → Beliefs**.
+Типизированные intents проходят валидацию; перемещения следуют связям локаций.
+Director создаёт `show_action`, перемещения и признания в журнале мира.
+Журнал `engine.show.journal` хранит неизменяемые `ShowEvent` со строковыми JSON
+payload, источником и причинными id: открытие, голос, выбор, закрытие, recap.
+Состояния целей и recap восстанавливаются из этого журнала.
+
+```python
+from pathlib import Path
+from glasshouse.simulation.engine import SimulationEngine
+from glasshouse.simulation.snapshot import SimulationSnapshot
+from glasshouse.simulation.replay import replay_from
+
+engine = SimulationEngine(seed=42, tick_minutes=120, influence_per_tick=3)
+engine.tick()
+Path("season.json").write_text(engine.snapshot().model_dump_json(), encoding="utf-8")
+snapshot = SimulationSnapshot.model_validate_json(Path("season.json").read_text(encoding="utf-8"))
+restored = replay_from(snapshot, llm_log=[], ticks=1)
+```
+
+Snapshot содержит мир, персонажей, журнал голосования, конфигурацию, сцены и
+ожидающие события. Для базового режима одинаковые seed, начальные данные,
+последовательность голосов и длительности тиков дают одинаковую историю,
+включая идентификаторы и продолжение после snapshot. При изменении политики
+`director:v1` старый replay потребует соответствующей версии кода.
+
+LLM по умолчанию отсутствует. Public Show не запрашивает и не сохраняет свободный
+LLM-текст: сцены и recap используют безопасные шаблоны. Прежний опциональный
+cognition/scene-summary путь сохранён для debug-сценариев. Его ошибки логируются
+JSON-диагностикой `llm_failure` (tick, agent_id, trigger, schema, error_type,
+fallback); автономный ход продолжается. Цепочка cognition ограничена 64
+реакциями за тик. Replay опционального LLM-пути требует записанных ответов;
+гарантия полной детерминированности нового среза относится к базовому режиму.
+
+## Границы первой итерации
+
+Состояние и журнал находятся **в памяти процесса**. Перезапуск сбрасывает API-сезон;
+автоматического сохранения нет. Snapshot можно сохранить вручную, как выше.
+Без аутентификации лимит проверяется по переданному `viewer_id`; это ещё не защита
+от создания множества зрителей. Старые debug endpoints (`/agents`, `/claims`,
+`/events`, `/sim` и другие) доступны и содержат внутреннее состояние; `/sim/run`
+явно заменяет сезон. Запуск выше предназначен для локальной разработки.
+
+Платежей, денежных ставок, вывода очков и внешней инфраструктуры нет.
+PostgreSQL/pgvector и миграции из прототипа сохранены, но для Public Show Core
+не требуются. Необязательные evaluation-тесты запускаются отдельно:
+`pytest tests/ -m evaluation` (нужен API key).
+
+Дальше, отдельными задачами: сохранение сезона и журнала на диск; простой
+серверный веб-интерфейс; шаблоны ru/en; дополнительные сюжетные линии;
+идентификация зрителей и защита голосования от повторов/множества идентичностей.

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from apps.api.routes import agents, claims, drama, events, scenes, sim
+from apps.api.routes import agents, claims, drama, events, scenes, show, sim
 
 app = FastAPI(title="Glasshouse Debug API", version="0.1.0")
+
+app.include_router(show.router, prefix="/public", tags=["public show"])
 
 app.include_router(sim.router, prefix="/sim", tags=["sim"])
 app.include_router(agents.router, prefix="/agents", tags=["agents"])

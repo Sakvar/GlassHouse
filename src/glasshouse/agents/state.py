@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-from glasshouse.agents.models import CurrentState, Goals, Needs, Personality
-from glasshouse.cognition.beliefs import Belief, BeliefStore
-from glasshouse.cognition.claims import Claim, ClaimStore
-from glasshouse.cognition.perception import KnowledgeEntry, KnowledgeStore
+from pydantic import BaseModel, Field
+
+from glasshouse.agents.models import (
+    CurrentState,
+    Goals,
+    Needs,
+    Personality,
+    SecretFact,
+    SocialBoundaries,
+)
+from glasshouse.cognition.beliefs import BeliefStore
+from glasshouse.cognition.claims import ClaimStore
+from glasshouse.cognition.perception import KnowledgeStore
 from glasshouse.memory.stores import MemoryStore
 from glasshouse.relationships.models import RelationshipVector
-from glasshouse.world.models import Activity, AgentRef
-from pydantic import BaseModel, Field
+from glasshouse.world.models import AgentRef
 
 
 class AgentState(BaseModel):
@@ -16,6 +24,8 @@ class AgentState(BaseModel):
     personality: Personality = Field(default_factory=Personality)
     needs: Needs = Field(default_factory=Needs)
     goals: Goals = Field(default_factory=Goals)
+    secrets: tuple[SecretFact, ...] = ()
+    boundaries: SocialBoundaries = Field(default_factory=SocialBoundaries)
     current: CurrentState = Field(default_factory=CurrentState)
     ref: AgentRef
     relationships: dict[str, RelationshipVector] = Field(default_factory=dict)

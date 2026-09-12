@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from glasshouse.agents.models import CurrentState, Goals, Needs, Personality
+from glasshouse.agents.models import (
+    Goals,
+    Personality,
+    SecretFact,
+    SocialBoundaries,
+)
 from glasshouse.agents.state import AgentState
 from glasshouse.relationships.models import RelationshipVector
 from glasshouse.world.models import Activity, AgentRef
@@ -11,6 +16,7 @@ def create_seed_agents() -> dict[str, AgentState]:
         "max": AgentState(
             id="max",
             name="Max",
+            secrets=(SecretFact(id="max_unpaid_debt", other_character_id="dan"),),
             personality=Personality(extraversion=0.8, competitiveness=0.9, impulsivity=0.7),
             goals=Goals(
                 today="Spend time with Eva",
@@ -66,6 +72,8 @@ def create_seed_agents() -> dict[str, AgentState]:
             },
         ),
     }
+    for aid, partners in {"max": ("eva",), "eva": ("max",), "dan": ("eva",), "lea": ()}.items():
+        agents[aid].boundaries = SocialBoundaries(romantic_partners=partners)
     return agents
 
 

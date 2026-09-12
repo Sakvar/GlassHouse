@@ -23,13 +23,21 @@ class ActivityCapabilities(BaseModel):
 
 
 CAPABILITIES_BY_ACTIVITY: dict[Activity, ActivityCapabilities] = {
-    Activity.SLEEPING: ActivityCapabilities(can_perceive=False, can_speak=False, interruptibility=0.0),
-    Activity.WALKING: ActivityCapabilities(can_perceive=True, can_speak=False, interruptibility=0.2),
+    Activity.SLEEPING: ActivityCapabilities(
+        can_perceive=False, can_speak=False, interruptibility=0.0
+    ),
+    Activity.WALKING: ActivityCapabilities(
+        can_perceive=True, can_speak=False, interruptibility=0.2
+    ),
     Activity.EATING: ActivityCapabilities(can_perceive=True, can_speak=False, interruptibility=0.3),
-    Activity.COOKING: ActivityCapabilities(can_perceive=True, can_speak=False, interruptibility=0.3),
+    Activity.COOKING: ActivityCapabilities(
+        can_perceive=True, can_speak=False, interruptibility=0.3
+    ),
     Activity.SITTING: ActivityCapabilities(can_perceive=True, can_speak=True, interruptibility=0.8),
     Activity.IDLE: ActivityCapabilities(can_perceive=True, can_speak=True, interruptibility=0.8),
-    Activity.CONVERSING: ActivityCapabilities(can_perceive=True, can_speak=True, interruptibility=0.9),
+    Activity.CONVERSING: ActivityCapabilities(
+        can_perceive=True, can_speak=True, interruptibility=0.9
+    ),
 }
 
 
@@ -55,6 +63,7 @@ class AgentRef(BaseModel):
 
 
 class WorldEventType(str, Enum):
+    SHOW_ACTION = "show_action"
     MOVE = "move"
     SLEEP = "sleep"
     EAT = "eat"

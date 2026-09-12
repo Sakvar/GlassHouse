@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -77,6 +76,7 @@ def perceive_event(world: WorldState, event: WorldEvent) -> list[KnowledgeEntry]
         sensory = _build_sensory_content(event, level)
         entries.append(
             KnowledgeEntry(
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{event.id}:{agent_id}:{world.tick}")),
                 event_id=event.id,
                 agent_id=agent_id,
                 perception_level=level,

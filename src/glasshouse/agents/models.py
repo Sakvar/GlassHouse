@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Personality(BaseModel):
@@ -28,3 +30,26 @@ class CurrentState(BaseModel):
     mood: str = "neutral"
     fatigue: float = Field(default=0.3, ge=0.0, le=1.0)
     plan: str = ""
+
+
+class SocialBoundaries(BaseModel):
+    """Mutual, explicit preferences; an empty partner list means no romance."""
+
+    romantic_partners: tuple[str, ...] = ()
+    romance_allowed: bool = True
+    private_conversation_allowed: bool = True
+    secret_sharing_allowed: bool = True
+    blocked_characters: tuple[str, ...] = ()
+    minimum_trust: float = Field(default=20, ge=-100, le=100)
+    minimum_affinity: float = Field(default=10, ge=-100, le=100)
+    minimum_attraction: float = Field(default=30, ge=-100, le=100)
+
+
+class SecretFact(BaseModel):
+    """An explicit world-seed fact, separate from a character's private ambitions."""
+
+    model_config = ConfigDict(frozen=True)
+    id: str
+    other_character_id: str
+    # The first season supports a single factual secret, with a fixed safe template.
+    predicate: Literal["borrowed_money_unrepaid"] = "borrowed_money_unrepaid"

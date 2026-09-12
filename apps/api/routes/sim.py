@@ -27,7 +27,7 @@ def run_sim(hours: float = 1.0, seed: int = 42) -> dict:
     from glasshouse.simulation.engine import SimulationEngine
 
     engine = SimulationEngine(seed=seed)
-    engine.run(hours=hours, ticks_per_hour=60)
+    engine.run(hours=hours)
     from apps.api.state import set_engine
 
     set_engine(engine)

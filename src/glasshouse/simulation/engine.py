@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
+import logging
+import math
 import random
 from datetime import datetime, timedelta
-from typing import Any
+from threading import RLock
 
-from glasshouse.agents.seeds import create_seed_agents, sync_agent_refs
+from glasshouse.agents.seeds import create_seed_agents
 from glasshouse.agents.state import AgentState
-from glasshouse.cognition.claims import Claim, ClaimPredicate, derive_claim
+from glasshouse.cognition.claims import Claim, ClaimPredicate
 from glasshouse.cognition.perception import perceive_event, write_knowledge
 from glasshouse.cognition.pipeline import run_cognition
-from glasshouse.cognition.triggers import CognitionTrigger, TRIGGER_PRIORITIES
+from glasshouse.cognition.triggers import TRIGGER_PRIORITIES, CognitionTrigger
 from glasshouse.events.queue import EventQueue
 from glasshouse.llm.provider import LLMProvider, ModelTier
 from glasshouse.llm.schemas import (
@@ -21,22 +24,23 @@ from glasshouse.llm.schemas import (
     StartConversationIntent,
     UtteranceIntent,
 )
-from glasshouse.llm.stub import ScriptedStubLLM
 from glasshouse.memory.stores import WorkingMemoryItem
 from glasshouse.relationships.appraisal_rules import apply_appraisal
 from glasshouse.scenes.manager import SceneManager
 from glasshouse.scenes.models import SemanticChange
+from glasshouse.show.director import PublicShowDirector
+from glasshouse.show.models import RelationshipChange, ShowConfig, ShowEvent
 from glasshouse.simulation.drama import DramaScore, score_drama
 from glasshouse.simulation.snapshot import SimulationSnapshot
 from glasshouse.world.actions import (
     create_truth_admission_event,
     create_utterance_event,
     move_agent,
-    set_activity,
 )
 from glasshouse.world.house import create_initial_world
 from glasshouse.world.models import Activity, WorldEvent, WorldEventType
-from glasshouse.world.perception import PerceptionLevel
+
+logger = logging.getLogger(__name__)
 
 
 class SimulationEngine:
@@ -46,18 +50,26 @@ class SimulationEngine:
         agents: dict[str, AgentState] | None = None,
         seed: int = 42,
         llm: LLMProvider | None = None,
+        tick_minutes: int = 120,
+        influence_per_tick: int = 3,
+        show_journal: tuple[ShowEvent, ...] = (),
     ) -> None:
-        self.world = world or create_initial_world()
-        self.agents = agents or create_seed_agents()
+        self.lock = RLock()
+        self.show_config = ShowConfig(
+            tick_minutes=tick_minutes, influence_per_tick=influence_per_tick
+        )
+        self.world = world if world is not None else create_initial_world()
+        self.agents = agents if agents is not None else create_seed_agents()
         self.rng = random.Random(seed)
         self.seed = seed
-        self.llm = llm or ScriptedStubLLM([])
+        self.llm = llm
         self.event_queue = EventQueue()
         self.scene_manager = SceneManager()
         self.drama_scores: list[DramaScore] = []
         self._init_world_agents()
         self._semantic_change = SemanticChange()
         self._knowledge_only_turn = False
+        self.show = PublicShowDirector(self, show_journal)
 
     def _init_world_agents(self) -> None:
         for agent_id, state in self.agents.items():
@@ -79,9 +91,7 @@ class SimulationEngine:
     ) -> WorldEvent:
         claim.holder_id = actor_id
         self.agents[actor_id].claims.add(claim)
-        event = create_truth_admission_event(
-            self.world, actor_id, claim.id, volume=volume
-        )
+        event = create_truth_admission_event(self.world, actor_id, claim.id, volume=volume)
         self.inject_event(event)
         return event
 
@@ -161,7 +171,8 @@ class SimulationEngine:
                 [agent_id, intent.target] if intent.target else [agent_id]
             )
             observers = [
-                aid for aid, ref in self.world.agents.items()
+                aid
+                for aid, ref in self.world.agents.items()
                 if ref.location_id == location and aid not in participants
             ]
             scene = self.scene_manager.start_scene(
@@ -213,7 +224,10 @@ class SimulationEngine:
 
     def _resolve_intent_schema(self, trigger: CognitionTrigger) -> type[Intent]:
         predicates = trigger.context.get("predicates", [])
-        if trigger.trigger_type == "truth_admission" or ClaimPredicate.BORROWED_MONEY_UNREPAID.value in predicates:
+        if (
+            trigger.trigger_type == "truth_admission"
+            or ClaimPredicate.BORROWED_MONEY_UNREPAID.value in predicates
+        ):
             return FormClaimIntent
         if ClaimPredicate.UNRELIABLE_WITH_MONEY.value in predicates:
             return BeliefUpdateIntent
@@ -223,16 +237,37 @@ class SimulationEngine:
             return StartConversationIntent
         return UtteranceIntent
 
+    def _log_llm_failure(self, exc: Exception, *, agent_id: str, trigger: str, schema: str) -> None:
+        diagnostic = {
+            "event": "llm_failure",
+            "tick": self.world.tick,
+            "agent_id": agent_id,
+            "trigger": trigger,
+            "schema": schema,
+            "error_type": type(exc).__name__,
+            "fallback": "deterministic_director",
+        }
+        logger.warning(json.dumps(diagnostic, sort_keys=True), extra={"diagnostic": diagnostic})
+
     def process_cognition_triggers(self, triggers: list[CognitionTrigger]) -> None:
+        if self.llm is None:
+            return
         sorted_triggers = sorted(triggers, key=lambda t: (t.tick, t.priority, t.agent_id))
-        for trigger in sorted_triggers:
+        processed = 0
+        while sorted_triggers and processed < 64:
+            trigger = sorted_triggers.pop(0)
+            processed += 1
             agent = self.agents[trigger.agent_id]
             schema = self._resolve_intent_schema(trigger)
             try:
-                intent = run_cognition(
-                    agent, trigger, self.llm, schema, self.world.locations
+                intent = run_cognition(agent, trigger, self.llm, schema, self.world.locations)
+            except Exception as exc:
+                self._log_llm_failure(
+                    exc,
+                    agent_id=trigger.agent_id,
+                    trigger=trigger.trigger_type,
+                    schema=schema.__name__,
                 )
-            except Exception:
                 continue
             if intent is None:
                 continue
@@ -240,7 +275,13 @@ class SimulationEngine:
             for event in new_events:
                 self.world.append_event(event)
                 new_triggers = self.process_perception(event)
-                self.process_cognition_triggers(new_triggers)
+                sorted_triggers.extend(new_triggers)
+                sorted_triggers.sort(key=lambda t: (t.tick, t.priority, t.agent_id))
+        if sorted_triggers:
+            logger.warning(
+                "cognition_budget_exhausted",
+                extra={"tick": self.world.tick, "remaining": len(sorted_triggers)},
+            )
 
     def process_scenes(self) -> None:
         for scene in self.scene_manager.active_scenes():
@@ -259,6 +300,7 @@ class SimulationEngine:
                 if hasattr(self.llm, "generate_structured"):
                     try:
                         from glasshouse.llm.provider import LLMCallContext
+
                         summary = self.llm.generate_structured(
                             LLMCallContext(
                                 agent_id=scene.participants[0],
@@ -269,8 +311,13 @@ class SimulationEngine:
                             SceneSummary,
                             ModelTier.FAST,
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self._log_llm_failure(
+                            exc,
+                            agent_id=scene.participants[0],
+                            trigger="scene_collapse",
+                            schema="SceneSummary",
+                        )
                 memory = self.scene_manager.collapse_scene(scene.id, summary, self.world.tick)
                 for pid in scene.participants:
                     if pid in self.agents:
@@ -284,39 +331,73 @@ class SimulationEngine:
                 )
                 self.world.append_event(collapse_event)
 
-    def tick(self, delta_minutes: int = 1) -> list[WorldEvent]:
-        self._semantic_change = SemanticChange()
-        self._knowledge_only_turn = False
-        tick_events: list[WorldEvent] = []
+    def tick(self, delta_minutes: int | None = None) -> list[WorldEvent]:
+        with self.lock:
+            minutes = self.show_config.tick_minutes if delta_minutes is None else delta_minutes
+            ShowConfig(tick_minutes=minutes)  # Validate before mutating the world.
+            self._semantic_change = SemanticChange()
+            self._knowledge_only_turn = False
+            start = len(self.world.events_log)
+            relationships_before = {
+                (aid, bid): a.get_relationship(bid).model_dump()
+                for aid, a in self.agents.items()
+                for bid in self.agents
+                if aid != bid
+            }
+            self._advance_time(minutes)
+            selected = self.show.select_goal()
 
-        self._advance_time(delta_minutes)
-
-        pending = self.event_queue.drain_world_events(self.world.tick)
-        all_triggers: list[CognitionTrigger] = []
-
-        for event in pending:
-            self.world.append_event(event)
-            tick_events.append(event)
-            triggers = self.process_perception(event)
-            all_triggers.extend(triggers)
-
-        self.process_cognition_triggers(all_triggers)
-        self.process_scenes()
-        self.drama_scores = score_drama(self.agents, self.world)
-
-        return tick_events
+            pending = self.event_queue.drain_world_events(self.world.tick)
+            all_triggers: list[CognitionTrigger] = []
+            for event in pending:
+                self.world.append_event(event)
+                all_triggers.extend(self.process_perception(event))
+            self.process_cognition_triggers(all_triggers)
+            result = self.show.play(selected)
+            self.process_scenes()
+            self.drama_scores = score_drama(self.agents, self.world)
+            tick_events = self.world.events_log[start:]
+            changes = tuple(
+                RelationshipChange(
+                    actor_id=aid,
+                    target_id=bid,
+                    dimension=dimension,
+                    before=before[dimension],
+                    after=after,
+                )
+                for (aid, bid), before in sorted(relationships_before.items())
+                for dimension, after in self.agents[aid].get_relationship(bid).model_dump().items()
+                if before[dimension] != after
+            )
+            self.show.finish_tick(selected, result, tick_events, changes)
+            return tick_events
 
     def snapshot(self) -> SimulationSnapshot:
+        with self.lock:
+            return self._snapshot()
+
+    def _snapshot(self) -> SimulationSnapshot:
         return SimulationSnapshot(
             tick=self.world.tick,
             sim_time=self.world.sim_time,
             seed=self.seed,
             world=self.world.model_copy(deep=True),
             agents={k: v.model_copy(deep=True) for k, v in self.agents.items()},
-            drama_scores=self.drama_scores,
+            drama_scores=[s.model_copy(deep=True) for s in self.drama_scores],
+            show_config=self.show_config,
+            show_journal=self.show.journal,
+            llm_enabled=self.llm is not None,
+            scenes=[s.model_copy(deep=True) for s in self.scene_manager.scenes.values()],
+            pending_world=self.event_queue.export_world(),
         )
 
-    def run(self, hours: float = 48, ticks_per_hour: int = 60) -> None:
-        total_ticks = int(hours * ticks_per_hour)
-        for _ in range(total_ticks):
-            self.tick()
+    def run(self, hours: float = 48, ticks_per_hour: int | None = None) -> None:
+        if not math.isfinite(hours) or hours < 0:
+            raise ValueError("hours must be finite and non-negative")
+        minutes = self.show_config.tick_minutes
+        if ticks_per_hour is not None:
+            if ticks_per_hour < 1 or 60 % ticks_per_hour:
+                raise ValueError("ticks_per_hour must divide 60 into whole minutes")
+            minutes = 60 // ticks_per_hour
+        for _ in range(math.ceil(hours * 60 / minutes)):
+            self.tick(delta_minutes=minutes)
