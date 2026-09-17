@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="auth-card card"><span class="eyebrow">GLASSHOUSE LIVE</span><h1>{{ t.register if registering else t.login }}</h1><p class="muted">{{ t.guest }}</p>
+<form action="{{ '/register' if registering else '/login' }}" method="post" class="stack">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="email">{{ t.email }}</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" required>
+{% if registering %}<label for="display_name">{{ t.name }}</label><input id="display_name" name="display_name" autocomplete="nickname" minlength="2" maxlength="40" required><input type="hidden" name="locale" value="{{ locale }}">{% endif %}
+<label for="password">{{ t.password }}</label><input id="password" name="password" type="password" autocomplete="{{ 'new-password' if registering else 'current-password' }}" minlength="{{ 12 if registering else 1 }}" maxlength="128" required>
+<button type="submit">{{ t.register if registering else t.login }} ↗</button>
+</form><p class="muted small">{{ t.privacy }}</p><a href="{{ '/login' if registering else '/register' }}">{{ t.login if registering else t.register }}</a>
+</section>
+{% endblock %}

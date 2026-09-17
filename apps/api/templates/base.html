@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ t.intro }}">
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"selfRequestsOnly":true}'>
+  <title>GlassHouse Live · {{ t.villa }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script><script src="/static/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">{{ t.watch }}</a>
+<header class="site-header wrap">
+  <a href="/" class="brand" aria-label="GlassHouse Live"><span class="brand-mark" aria-hidden="true">◇</span> GLASSHOUSE <span class="brand-live">LIVE</span></a>
+  <nav aria-label="{{ t.show }}">
+    <a href="/show" {% if request.url.path == '/show' %}aria-current="page"{% endif %}>{{ t.show }}</a>
+    <a href="/history" {% if request.url.path == '/history' %}aria-current="page"{% endif %}>{{ t.history }}</a>
+    <a href="{{ '/account' if user else '/login' }}">{{ t.account if user else t.login }}</a>
+  </nav>
+  <form action="/locale" method="post" class="locale-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ request.url.path }}">
+    <button name="locale" value="ru" lang="ru" aria-pressed="{{ 'true' if locale == 'ru' else 'false' }}">RU</button>
+    <span aria-hidden="true">/</span><button name="locale" value="en" lang="en" aria-pressed="{{ 'true' if locale == 'en' else 'false' }}">EN</button>
+  </form>
+</header>
+<main id="main" class="wrap">{% block content %}{% endblock %}</main>
+<footer class="wrap footer"><span>GLASSHOUSE LIVE <span class="muted"> / PUBLIC BETA</span></span><span>{{ t.footer }}</span></footer>
+<div id="connection-error" class="toast error" role="alert" hidden>{{ t.offline }}</div>
+</body>
+</html>

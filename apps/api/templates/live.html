@@ -1,0 +1,18 @@
+<div id="live" hx-get="/fragments/live?lang={{ locale }}" hx-trigger="every 15s" hx-swap="outerHTML" hx-sync="this:drop">
+  <div class="season-header">
+    <div><span class="eyebrow">{{ t.season }} <span class="live-dot"></span> {{ t.live }}</span><h1>{{ season.setting }}<span class="title-dot">.</span></h1></div>
+    <div class="clock"><span class="eyebrow">{{ t.next }}</span><strong data-countdown="{{ season.next_tick_at }}" data-ready="{{ t.starting }}">—:—</strong><span class="muted">{{ t.episode }} {{ season.voting_tick }}</span></div>
+  </div>
+  <section aria-labelledby="cast-heading"><h2 class="eyebrow" id="cast-heading">{{ t.cast }}</h2>
+    <div class="cast-grid">{% for person in season.characters %}
+      <article class="character card"><div class="avatar avatar-{{ person.id }}" aria-hidden="true">{{ person.name[0] }}<span>0{{ loop.index }}</span></div>
+      <div><h3>{{ person.name }}</h3><p>{{ person.location }} · {{ person.activity }}</p><span class="mood">{{ person.mood }}</span></div></article>
+    {% endfor %}</div>
+  </section>
+  {% if season.latest_recap %}{% with episode=season.latest_recap %}{% include 'recap.html' %}{% endwith %}
+  {% else %}<div class="card empty"><span class="eyebrow">{{ t.season }}</span><h2>{{ t.empty }}</h2></div>{% endif %}
+  {% include 'goals.html' %}
+  {% if history['items'] %}<section class="timeline"><div class="section-heading"><h2>{{ t.timeline }}</h2><a href="/history">{{ t.history }} ↗</a></div>
+    {% for item in history['items'] %}<article class="timeline-row"><span class="eyebrow">{{ t.episode }} {{ item.tick }}</span><div><h3>{{ item.headline }}</h3><p>{{ item.what_happened }}</p></div></article>{% endfor %}</section>{% endif %}
+  {% if development and user %}<form id="manual-tick" action="/dev/tick" method="post" class="dev-form"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">{{ t.tick }}</button></form>{% endif %}
+</div>

@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><span class="eyebrow">{{ t.season }}</span><h1>{{ t.history }}</h1></div>
+{% for episode in history['items'] %}{% include 'recap.html' %}{% else %}<p class="empty card">{{ t.empty }}</p>{% endfor %}
+<nav class="pagination" aria-label="{{ t.history }}">{% if history.page > 1 %}<a class="button secondary" href="/history?page={{ history.page - 1 }}&lang={{ locale }}">← {{ t.previous }}</a>{% endif %}<span>{{ history.page }}</span>{% if history.has_next %}<a class="button secondary" href="/history?page={{ history.page + 1 }}&lang={{ locale }}">{{ t.more }} →</a>{% endif %}</nav>
+{% endblock %}

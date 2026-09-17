@@ -1,0 +1,28 @@
+<section id="goals" class="goals-section" aria-labelledby="goals-heading">
+  {% if development and user %}<input type="hidden" name="revision" form="manual-tick" value="{{ season.revision }}">{% endif %}
+  <div class="section-heading"><div><span class="eyebrow">{{ t.episode }} {{ goals.tick }}</span><h2 id="goals-heading">{{ t.goals }}</h2></div>
+  {% if user %}<div class="budget">{{ t.remaining }} <strong>{{ goals.remaining }}<small> / 3</small></strong></div>{% endif %}</div>
+  <p class="muted rules">{{ t.rules }}</p>
+  {% if error %}<p role="alert" class="notice error">{{ error }}</p>{% endif %}
+  {% if notice %}<p role="status" class="notice">{{ notice }}</p>{% endif %}
+  {% if not user %}<div class="guest-prompt"><p>{{ t.guest }}</p><a class="button" href="/register">{{ t.register }} ↗</a></div>{% endif %}
+  {% if user and goals.remaining == 0 %}<p class="notice">{{ t.exhausted }}</p>{% endif %}
+  <div class="goals-grid">
+  {% for goal in goals.goals %}
+    <article class="goal card">
+      <div class="goal-top"><span class="goal-number">0{{ loop.index }}</span><span class="pill">{{ goal.votes }} {{ t.votes }}</span></div>
+      <h3>{{ goal.title }}</h3><p>{{ goal.description }}</p>
+      {% if user and goals.remaining %}
+      <form action="/vote" method="post" hx-post="/vote?lang={{ locale }}" hx-target="#goals" hx-swap="outerHTML" hx-sync="#live:replace" hx-disabled-elt="find button" hx-indicator="find .htmx-indicator">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="story_goal_id" value="{{ goal.id }}">
+        <input type="hidden" name="tick" value="{{ goal.tick }}"><input type="hidden" name="request_id" value="{{ uuid() }}">
+        <div class="vote-controls"><label for="points-{{ loop.index }}">{{ t.points }}</label>
+        <select name="influence_points" id="points-{{ loop.index }}">{% for n in range(1, goals.remaining + 1) %}<option value="{{ n }}">{{ n }}</option>{% endfor %}</select>
+        <button type="submit">{{ t.vote }} <span aria-hidden="true">+</span></button></div>
+        <span class="htmx-indicator" role="status">{{ t.loading }}</span>
+      </form>
+      {% endif %}
+    </article>
+  {% endfor %}
+  </div>
+</section>

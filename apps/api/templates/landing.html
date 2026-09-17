@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero"><div class="hero-copy"><span class="eyebrow"><span class="live-dot"></span> {{ t.season }} / {{ t.live }}</span><h1>{{ t.headline }}</h1><p>{{ t.intro }}</p><div class="hero-actions"><a class="button" href="/show">{{ t.watch }} ↗</a>{% if not user %}<a class="text-link" href="/register">{{ t.register }}</a>{% endif %}</div></div>
+<div class="villa-art" aria-hidden="true"><div class="villa-roof"></div><div class="villa-window window-one"><span>D</span></div><div class="villa-window window-two"><span>E</span></div><div class="villa-window window-three"><span>M</span></div><div class="villa-window window-four"><span>L</span></div><div class="villa-label">THE VILLA<br><small>01 — ON AIR</small></div></div></section>
+<div class="entry-bar"><span class="eyebrow">{{ t.villa }} / {{ t.episode }} {{ season.tick }}</span><span>{{ t.next }} <strong data-countdown="{{ season.next_tick_at }}" data-ready="{{ t.starting }}">—:—</strong></span></div>
+{% if season.latest_recap %}{% with episode=season.latest_recap %}{% include 'recap.html' %}{% endwith %}{% else %}<div class="empty card"><h2>{{ t.empty }}</h2><p>{{ t.rules }}</p></div>{% endif %}
+{% endblock %}

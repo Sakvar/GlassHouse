@@ -1,0 +1,58 @@
+name: glasshouse-live
+x-app: &app
+  build: .
+  env_file: .env
+  environment:
+    DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://glasshouse:glasshouse@postgres:5432/glasshouse}
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  stop_grace_period: 30s
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: glasshouse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-glasshouse}
+      POSTGRES_DB: glasshouse
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U glasshouse -d glasshouse"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+  api:
+    <<: *app
+    command: ["python", "scripts/start_api.py"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 15s
+    mem_limit: 768m
+  worker:
+    <<: *app
+    command: ["python", "-m", "glasshouse.live.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 768m
+
+volumes:
+  pgdata:

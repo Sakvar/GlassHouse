@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><span class="eyebrow">GLASSHOUSE LIVE</span><h1>{{ t.account }}</h1></div>
+<div class="account-grid"><section class="card"><h2>{{ user.display_name }}</h2><form action="/account" method="post" class="stack"><input type="hidden" name="csrf" value="{{ csrf }}"><label for="display_name">{{ t.name }}</label><input id="display_name" name="display_name" value="{{ user.display_name }}" minlength="2" maxlength="40" required><label for="locale">{{ t.locale }}</label><select name="locale" id="locale"><option value="ru" {% if user.locale == 'ru' %}selected{% endif %}>Русский</option><option value="en" {% if user.locale == 'en' %}selected{% endif %}>English</option></select><button>{{ t.save }}</button></form>
+<form action="/logout" method="post" class="logout-form"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">{{ t.logout }}</button></form></section>
+<section class="card"><h2>{{ t.my_votes }}</h2>{% for vote in votes %}<div class="vote-history"><span class="eyebrow">{{ t.episode }} {{ vote.tick }}</span><p>{{ vote.title }}</p><strong>+{{ vote.points }}</strong></div>{% else %}<p class="muted">{{ t.no_votes }}</p>{% endfor %}</section></div>
+{% endblock %}
