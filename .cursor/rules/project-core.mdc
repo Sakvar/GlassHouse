@@ -1,0 +1,12 @@
+---
+description: Core project standards for GlassHouse
+alwaysApply: true
+---
+
+# GlassHouse core standards
+
+- Minimize scope: solve the requested problem without drive-by changes.
+- Match existing naming, structure, and patterns in the repo.
+- Prefer editing existing files over adding new abstractions.
+- Comments only for non-obvious logic; avoid narrating what the code already shows.
+- Do not modify generated or vendor directories unless the task requires it.
