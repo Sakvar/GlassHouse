@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import timedelta
 from uuid import uuid4
@@ -8,10 +9,28 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from glasshouse.live.i18n import NAMES, STATUS, STRINGS, episode_view, goal_view
-from glasshouse.live.models import Budget, LLMRun, RecapRow, Season, ShowEventRow, VoteRow, now
+from glasshouse.live.models import (
+    Budget,
+    LLMRun,
+    OfferRow,
+    RecapRow,
+    Season,
+    ShowEventRow,
+    VoteRow,
+    now,
+)
 from glasshouse.live.narrator import OpenRouterNarrator
-from glasshouse.live.schemas import Character, Episode, GoalsView, Page, SeasonView, VoteReceipt
-from glasshouse.show.models import ViewerVote
+from glasshouse.live.schemas import (
+    Character,
+    Episode,
+    GoalsView,
+    OfferReceipt,
+    Page,
+    SeasonView,
+    VoteReceipt,
+)
+from glasshouse.show.models import OfferActionType, ViewerOffer, ViewerVote
+from glasshouse.show.offers import price_offer
 from glasshouse.simulation.engine import SimulationEngine
 from glasshouse.simulation.replay import replay_from
 from glasshouse.simulation.snapshot import SimulationSnapshot
@@ -34,7 +53,12 @@ class ShowService:
         with self.sessions() as db:
             if db.get(Season, "villa-1"):
                 return
-        engine = SimulationEngine(seed=42)
+        engine = SimulationEngine(
+            seed=42,
+            max_offers_per_viewer=self.settings.max_offers_per_viewer,
+            max_offer_points_per_goal=self.settings.max_offer_points_per_goal,
+            offer_policy_version=self.settings.offer_policy_version,
+        )
         try:
             with self.sessions.begin() as db:
                 row = Season(
@@ -223,6 +247,123 @@ class ShowService:
             )
             self._save(db, row, engine, old_length)
             return VoteReceipt(tick=vote.tick, remaining=self._remaining(db, user_id, vote.tick))
+
+    @staticmethod
+    def _viewer_key(season_id, user_id):
+        return hashlib.sha256(f"{season_id}:{user_id}".encode()).hexdigest()[:32]
+
+    def _offer_receipt(self, db, engine, row, user_id, duplicate=False):
+        actor = engine.agents[row.actor_id]
+        quote = price_offer(actor, OfferActionType(row.action_type), row.target_id)
+        return OfferReceipt(
+            duplicate=duplicate,
+            offer_id=row.id,
+            tick=row.tick,
+            remaining=self._remaining(db, user_id, row.tick),
+            estimated_price_min=quote.minimum,
+            estimated_price_max=quote.maximum,
+        )
+
+    def submit_offer(self, user_id, offer):
+        with self.sessions.begin() as db:
+            row, engine = self._load(db)
+            self._reserve(db, row)
+            duplicate = db.scalar(
+                select(OfferRow).where(
+                    OfferRow.season_id == row.id,
+                    OfferRow.user_id == user_id,
+                    OfferRow.request_id == offer.request_id,
+                )
+            )
+            if duplicate:
+                supplied = (
+                    offer.tick,
+                    offer.story_goal_id,
+                    offer.actor_id,
+                    offer.target_id,
+                    offer.action_type.value,
+                    offer.world_points,
+                )
+                stored = (
+                    duplicate.tick,
+                    duplicate.goal_id,
+                    duplicate.actor_id,
+                    duplicate.target_id,
+                    duplicate.action_type,
+                    duplicate.points,
+                )
+                if stored != supplied:
+                    raise DomainError("conflict")
+                return self._offer_receipt(db, engine, duplicate, user_id, duplicate=True)
+            goal = next((g for g in engine.show.goals if g.id == offer.story_goal_id), None)
+            if goal is None:
+                raise DomainError("missing", 404)
+            if (
+                row.status != "active"
+                or goal.status.value != "active"
+                or offer.tick != engine.world.tick + 1
+            ):
+                raise DomainError("conflict")
+            budget = db.get(Budget, (row.id, user_id, offer.tick))
+            if budget is None:
+                budget = Budget(season_id=row.id, user_id=user_id, tick=offer.tick, spent=0)
+                db.add(budget)
+                db.flush()
+            changed = db.execute(
+                update(Budget)
+                .where(
+                    Budget.season_id == row.id,
+                    Budget.user_id == user_id,
+                    Budget.tick == offer.tick,
+                    Budget.spent + offer.world_points <= engine.show_config.influence_per_tick,
+                )
+                .values(spent=Budget.spent + offer.world_points)
+            )
+            if changed.rowcount != 1:
+                raise DomainError("budget")
+            offer_id = str(uuid4())
+            old_length = len(engine.show.journal)
+            try:
+                engine.show.offer(
+                    ViewerOffer(
+                        id=offer_id,
+                        viewer_id=self._viewer_key(row.id, user_id),
+                        story_goal_id=offer.story_goal_id,
+                        tick=offer.tick,
+                        actor_id=offer.actor_id,
+                        target_id=offer.target_id,
+                        action_type=offer.action_type,
+                        world_points=offer.world_points,
+                    )
+                )
+            except KeyError:
+                raise DomainError("missing", 404) from None
+            except ValueError as exc:
+                code = "budget" if "лимит" in str(exc).lower() else "conflict"
+                raise DomainError(code) from None
+            stored = OfferRow(
+                id=offer_id,
+                season_id=row.id,
+                user_id=user_id,
+                tick=offer.tick,
+                goal_id=offer.story_goal_id,
+                actor_id=offer.actor_id,
+                target_id=offer.target_id,
+                action_type=offer.action_type.value,
+                points=offer.world_points,
+                request_id=offer.request_id,
+            )
+            db.add(stored)
+            self._save(db, row, engine, old_length)
+            return self._offer_receipt(db, engine, stored, user_id)
+
+    def offer(self, user_id, offer_id):
+        with self.sessions() as db:
+            row, engine = self._load(db)
+            offer = db.get(OfferRow, offer_id)
+            if offer is None or offer.season_id != row.id or offer.user_id != user_id:
+                raise DomainError("missing", 404)
+            return self._offer_receipt(db, engine, offer, user_id)
 
     def view(self, locale="ru", user_id=None):
         with self.sessions() as db:

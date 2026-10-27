@@ -52,11 +52,18 @@ class SimulationEngine:
         llm: LLMProvider | None = None,
         tick_minutes: int = 120,
         influence_per_tick: int = 3,
+        max_offers_per_viewer: int = 1,
+        max_offer_points_per_goal: int = 12,
+        offer_policy_version: str = "v1",
         show_journal: tuple[ShowEvent, ...] = (),
     ) -> None:
         self.lock = RLock()
         self.show_config = ShowConfig(
-            tick_minutes=tick_minutes, influence_per_tick=influence_per_tick
+            tick_minutes=tick_minutes,
+            influence_per_tick=influence_per_tick,
+            max_offers_per_viewer=max_offers_per_viewer,
+            max_offer_points_per_goal=max_offer_points_per_goal,
+            offer_policy_version=offer_policy_version,
         )
         self.world = world if world is not None else create_initial_world()
         self.agents = agents if agents is not None else create_seed_agents()

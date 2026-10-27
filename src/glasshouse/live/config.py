@@ -30,6 +30,11 @@ class Settings:
     llm_max_tokens: int = 600
     llm_input_chars: int = 12000
     llm_timeout: float = 15
+    max_offers_per_viewer: int = 1
+    max_offer_points_per_goal: int = 12
+    offer_policy_version: str = "v1"
+    adult_content_enabled: bool = False
+    paid_currency_enabled: bool = False
 
     def __post_init__(self):
         if self.app_env not in ("development", "test", "production"):
@@ -48,6 +53,12 @@ class Settings:
             raise ValueError("Invalid LLM budget")
         if not 1000 <= self.llm_input_chars <= 16000 or not 1 <= self.llm_timeout <= 60:
             raise ValueError("Invalid LLM input budget or timeout")
+        if not 1 <= self.max_offers_per_viewer <= 10:
+            raise ValueError("Invalid offer limit")
+        if not 1 <= self.max_offer_points_per_goal <= 1000:
+            raise ValueError("Invalid offer goal budget")
+        if self.adult_content_enabled or self.paid_currency_enabled:
+            raise ValueError("Adult content and paid currency are not supported in this release")
 
     @classmethod
     def from_env(cls):
@@ -73,4 +84,9 @@ class Settings:
             llm_max_tokens=int(os.getenv("LLM_MAX_OUTPUT_TOKENS_PER_TICK", "600")),
             llm_input_chars=int(os.getenv("LLM_MAX_INPUT_CHARS", "12000")),
             llm_timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "15")),
+            max_offers_per_viewer=int(os.getenv("MAX_OFFERS_PER_VIEWER", "1")),
+            max_offer_points_per_goal=int(os.getenv("MAX_OFFER_POINTS_PER_GOAL", "12")),
+            offer_policy_version=os.getenv("OFFER_POLICY_VERSION", "v1"),
+            adult_content_enabled=os.getenv("ADULT_CONTENT_ENABLED", "false").lower() == "true",
+            paid_currency_enabled=os.getenv("PAID_CURRENCY_ENABLED", "false").lower() == "true",
         )

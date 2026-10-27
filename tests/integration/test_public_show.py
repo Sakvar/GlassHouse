@@ -11,7 +11,14 @@ from apps.api.state import get_engine, set_engine
 from glasshouse.cognition.claims import Claim, ClaimPredicate
 from glasshouse.relationships.models import RelationshipVector
 from glasshouse.show.director import PublicShowDirector
-from glasshouse.show.models import GoalStatus, StoryCategory, ViewerVote
+from glasshouse.show.models import (
+    GoalStatus,
+    OfferActionType,
+    OfferStatus,
+    StoryCategory,
+    ViewerOffer,
+    ViewerVote,
+)
 from glasshouse.simulation.engine import SimulationEngine
 from glasshouse.simulation.replay import replay_from
 from glasshouse.simulation.snapshot import SimulationSnapshot
@@ -119,6 +126,56 @@ def test_limit_aggregates_across_goals_is_atomic_and_resets_each_tick():
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         assert sum(pool.map(cast, range(10))) == 3
+
+
+def test_offer_is_scoped_to_goal_respects_boundaries_and_replays():
+    engine = SimulationEngine(seed=19)
+    goal = next(g for g in engine.show.active_goals() if g.category == StoryCategory.CONVERSATION)
+    actor_id, target_id = goal.eligible_characters
+    engine.agents[actor_id].boundaries.blocked_characters = (target_id,)
+    engine.show.offer(
+        ViewerOffer(
+            id="offer-1",
+            viewer_id="viewer-1",
+            story_goal_id=goal.id,
+            tick=goal.tick,
+            actor_id=actor_id,
+            target_id=target_id,
+            action_type=OfferActionType.START_CONVERSATION,
+            world_points=3,
+        )
+    )
+    snapshot = SimulationSnapshot.model_validate_json(engine.snapshot().model_dump_json())
+    engine.tick()
+    result = resolved(engine).result
+    assert result.offer_decision.status == OfferStatus.REFUSED
+    assert result.offer_decision.reason == "personal_boundary"
+    assert result.relationship_changes == ()
+    assert engine.agents[actor_id].viewer_relations["viewer-1"].rejected_count == 1
+    replayed = replay_from(snapshot, [], ticks=1)
+    assert replayed.snapshot().model_dump_json() == engine.snapshot().model_dump_json()
+
+
+def test_offer_and_vote_share_engine_budget():
+    engine = SimulationEngine()
+    goal = next(g for g in engine.show.active_goals() if g.category == StoryCategory.CONVERSATION)
+    actor_id, target_id = goal.eligible_characters
+    engine.show.vote(
+        ViewerVote(viewer_id="viewer", story_goal_id=goal.id, tick=goal.tick, influence_points=2)
+    )
+    with pytest.raises(ValueError):
+        engine.show.offer(
+            ViewerOffer(
+                id="offer-over-budget",
+                viewer_id="viewer",
+                story_goal_id=goal.id,
+                tick=goal.tick,
+                actor_id=actor_id,
+                target_id=target_id,
+                action_type=OfferActionType.START_CONVERSATION,
+                world_points=2,
+            )
+        )
 
 
 @pytest.mark.parametrize("points", [0, -1, 1.5, True, "1"])

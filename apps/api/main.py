@@ -29,6 +29,8 @@ from glasshouse.live.schemas import (
     GoalsView,
     Health,
     Locale,
+    OfferInput,
+    OfferReceipt,
     Page,
     SeasonView,
     SessionView,
@@ -165,7 +167,7 @@ def create_app(settings=None):
         message = ERRORS.get(exc.code, ERRORS["invalid"])[0 if locale == "ru" else 1]
         if request.url.path.startswith("/public/") or request.url.path in ("/ready", "/health"):
             return JSONResponse({"code": exc.code, "message": message}, status_code=exc.status)
-        if request.headers.get("HX-Request") == "true" and request.url.path == "/vote":
+        if request.headers.get("HX-Request") == "true" and request.url.path in ("/vote", "/offer"):
             response = await run_in_threadpool(
                 lambda: render(request, "goals.html", **show_context(request), error=message)
             )
@@ -194,7 +196,7 @@ def create_app(settings=None):
     def ready(request: Request):
         with request.app.state.sessions() as db:
             version = db.scalar(text("SELECT version_num FROM alembic_version"))
-            if version != "002" or not db.get(Season, "villa-1"):
+            if version != "003" or not db.get(Season, "villa-1"):
                 raise DomainError("unavailable", 503)
         return Health(status="ready")
 
@@ -233,6 +235,20 @@ def create_app(settings=None):
     def vote(request: Request, body: VoteInput, user=Depends(require_user)):
         request.app.state.auth.limit("votes", user.id, 20, 60)
         return request.app.state.show.vote(user.id, body)
+
+    @app.post(
+        "/public/offers",
+        response_model=OfferReceipt,
+        status_code=201,
+        dependencies=[Depends(csrf)],
+    )
+    def submit_offer(request: Request, body: OfferInput, user=Depends(require_user)):
+        request.app.state.auth.limit("offers", user.id, 10, 60)
+        return request.app.state.show.submit_offer(user.id, body)
+
+    @app.get("/public/offers/{offer_id}", response_model=OfferReceipt)
+    def get_offer(request: Request, offer_id: str, user=Depends(require_user)):
+        return request.app.state.show.offer(user.id, offer_id)
 
     if settings.app_env == "development":
 
@@ -387,6 +403,34 @@ def create_app(settings=None):
                     "goals.html",
                     **show_context(request),
                     notice=STRINGS[locale_for(request)]["voted"],
+                )
+            )
+        return RedirectResponse("/show", status_code=303)
+
+    @app.post("/offer", response_class=HTMLResponse, dependencies=[Depends(csrf)])
+    async def html_offer(request: Request, user=Depends(require_user)):
+        form = await request.form()
+        try:
+            offer = OfferInput(
+                story_goal_id=form["story_goal_id"],
+                tick=int(form["tick"]),
+                actor_id=form["actor_id"],
+                target_id=form.get("target_id") or None,
+                action_type=form["action_type"],
+                world_points=int(form["world_points"]),
+                request_id=form["request_id"],
+            )
+        except (KeyError, ValueError):
+            raise DomainError("invalid", 422) from None
+        await run_in_threadpool(request.app.state.auth.limit, "offers", user.id, 10, 60)
+        await run_in_threadpool(request.app.state.show.submit_offer, user.id, offer)
+        if request.headers.get("HX-Request") == "true":
+            return await run_in_threadpool(
+                lambda: render(
+                    request,
+                    "goals.html",
+                    **show_context(request),
+                    notice=STRINGS[locale_for(request)]["offered"],
                 )
             )
         return RedirectResponse("/show", status_code=303)

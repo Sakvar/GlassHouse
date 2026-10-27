@@ -18,6 +18,26 @@ class StoryCategory(StrEnum):
     RECONCILIATION = "reconciliation"
 
 
+class OfferActionType(StrEnum):
+    START_CONVERSATION = "start_conversation"
+    HOUSEHOLD_TASK = "household_task"
+    PUBLIC_STATEMENT = "public_statement"
+    SPEND_TIME = "spend_time"
+    DEESCALATE = "deescalate"
+    SHARE_KNOWN_FACT = "share_known_fact"
+
+
+class OfferStatus(StrEnum):
+    SUBMITTED = "submitted"
+    ACCEPTED = "accepted"
+    NEGOTIATING = "negotiating"
+    ALTERNATIVE = "alternative"
+    PARTIAL = "partial"
+    REFUSED = "refused"
+    FULFILLED = "fulfilled"
+    EXPIRED = "expired"
+
+
 class GoalStatus(StrEnum):
     ACTIVE = "active"
     SELECTED = "selected"
@@ -35,6 +55,29 @@ class RelationshipChange(FrozenModel):
     after: float
 
 
+class ViewerOffer(FrozenModel):
+    id: str = Field(min_length=1, max_length=200)
+    viewer_id: str = Field(min_length=1, max_length=100, pattern=r"^\S+$")
+    story_goal_id: str = Field(min_length=1, max_length=200)
+    tick: int = Field(ge=1, strict=True)
+    actor_id: str = Field(min_length=1, max_length=64)
+    target_id: str | None = Field(default=None, max_length=64)
+    action_type: OfferActionType
+    world_points: int = Field(ge=1, strict=True)
+
+
+class OfferDecision(FrozenModel):
+    offer_ids: tuple[str, ...]
+    action_type: OfferActionType
+    actor_id: str
+    target_id: str | None = None
+    offered_points: int = Field(ge=1)
+    quoted_price: int = Field(ge=1)
+    status: OfferStatus
+    reason: str
+    alternative: OfferActionType | None = None
+
+
 class StoryResult(FrozenModel):
     outcome: Literal[
         "conversation", "date", "refusal", "revelation", "disagreement", "reconciliation", "rest"
@@ -44,6 +87,7 @@ class StoryResult(FrozenModel):
     event_ids: tuple[str, ...] = ()
     relationship_changes: tuple[RelationshipChange, ...] = ()
     revealed_secret_ids: tuple[str, ...] = ()
+    offer_decision: OfferDecision | None = None
 
 
 class StoryGoal(FrozenModel):
@@ -60,6 +104,8 @@ class StoryGoal(FrozenModel):
     result: StoryResult | None = None
     locale: Literal["ru", "en"] = "ru"
     director_score: float = 0
+    allowed_offer_types: tuple[OfferActionType, ...] = ()
+    offer_points: int = Field(default=0, ge=0)
 
 
 class ViewerVote(FrozenModel):
@@ -87,8 +133,16 @@ class ShowEvent(FrozenModel):
     id: str
     tick: int
     sim_time: str
-    kind: Literal["goal_opened", "vote_cast", "goal_selected", "goal_closed", "recap"]
-    source: Literal["director:v1", "viewer", "recap:v1"]
+    kind: Literal[
+        "goal_opened",
+        "vote_cast",
+        "offer_submitted",
+        "offer_resolved",
+        "goal_selected",
+        "goal_closed",
+        "recap",
+    ]
+    source: Literal["director:v1", "offer-policy:v1", "viewer", "recap:v1"]
     cause_ids: tuple[str, ...] = ()
     data_json: str
 
@@ -96,6 +150,9 @@ class ShowEvent(FrozenModel):
 class ShowConfig(FrozenModel):
     tick_minutes: int = Field(default=120, ge=1, le=1440, strict=True)
     influence_per_tick: int = Field(default=3, ge=1, le=100, strict=True)
+    max_offers_per_viewer: int = Field(default=1, ge=1, le=10, strict=True)
+    max_offer_points_per_goal: int = Field(default=12, ge=1, le=1000, strict=True)
+    offer_policy_version: str = "v1"
 
 
 class PublicCharacter(FrozenModel):

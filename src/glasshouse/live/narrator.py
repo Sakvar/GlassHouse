@@ -38,6 +38,12 @@ class OpenRouterNarrator:
             context = {
                 'participants': episode.participants, 'category': category,
                 'outcome': episode.outcome, 'relationship_changes': episode.relationship_changes,
+                'offer': {
+                    'status': episode.offer_status,
+                    'action': episode.offer_action,
+                    'points': episode.offer_points,
+                    'price': episode.offer_price,
+                } if episode.offer_status else None,
                 'locale': episode.locale,
                 'previous_public_recap': previous.what_happened if previous else None,
                 'approved_copy': options,

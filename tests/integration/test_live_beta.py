@@ -19,6 +19,7 @@ from glasshouse.live.db import connect
 from glasshouse.live.models import (
     Budget,
     LLMRun,
+    OfferRow,
     RecapRow,
     Season,
     ShowEventRow,
@@ -26,7 +27,7 @@ from glasshouse.live.models import (
     VoteRow,
     now,
 )
-from glasshouse.live.schemas import VoteInput
+from glasshouse.live.schemas import OfferInput, VoteInput
 from glasshouse.live.service import DomainError, ShowService
 from glasshouse.live.worker import main, run_once
 from glasshouse.simulation.replay import replay_from
@@ -76,6 +77,18 @@ def vote_input(goal, points=1, request_id=None):
         story_goal_id=goal.id,
         tick=goal.tick,
         influence_points=points,
+        request_id=request_id or uuid4().hex,
+    )
+
+
+def offer_input(goal, points=1, request_id=None):
+    return OfferInput(
+        story_goal_id=goal.id,
+        tick=goal.tick,
+        actor_id=goal.eligible_characters[0],
+        target_id=goal.eligible_characters[1],
+        action_type=goal.allowed_offer_types[0],
+        world_points=points,
         request_id=request_id or uuid4().hex,
     )
 
@@ -203,6 +216,28 @@ def test_database_budget_concurrent_votes_and_idempotency(storage):
         assert db.scalar(select(func.sum(VoteRow.points))) == 3
     show.tick()
     assert show.view(user_id=user.id)[1].remaining == 3
+
+
+def test_offer_persistence_idempotency_shared_budget_and_privacy(storage):
+    _, _, sessions, show = storage
+    user = add_user(sessions)
+    goal = show.view()[1].goals[0]
+    body = offer_input(goal, 2)
+    receipt = show.submit_offer(user.id, body)
+    assert receipt.remaining == 1
+    assert receipt.estimated_price_min >= 1
+    assert show.submit_offer(user.id, body).duplicate
+    with pytest.raises(DomainError) as conflict:
+        show.submit_offer(user.id, body.model_copy(update={"world_points": 1}))
+    assert conflict.value.code == "conflict"
+    with pytest.raises(DomainError) as budget:
+        show.vote(user.id, vote_input(goal, 2))
+    assert budget.value.code == "budget"
+    with sessions() as db:
+        row = db.get(OfferRow, receipt.offer_id)
+        assert row.user_id == user.id
+        snapshot = str(db.get(Season, "villa-1").snapshot)
+        assert user.email not in snapshot and user.id not in snapshot
 
 
 def test_worker_once_cli(storage):

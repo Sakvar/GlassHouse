@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from glasshouse.show.models import OfferActionType
+
 Locale = Literal["ru", "en"]
 
 
@@ -33,6 +35,10 @@ class Episode(NarratedRecap):
     relationship_changes: list[dict[str, str | float]]
     sim_time: str
     story_goal_id: str | None
+    offer_status: str | None = None
+    offer_action: str | None = None
+    offer_points: int | None = None
+    offer_price: int | None = None
     narrated: bool = False
 
 
@@ -67,6 +73,8 @@ class Goal(PublicModel):
     status: str
     tick: int
     votes: int
+    offer_points: int
+    allowed_offer_types: tuple[OfferActionType, ...]
     eligible_characters: tuple[str, ...]
     locale: Locale
 
@@ -98,6 +106,26 @@ class VoteReceipt(PublicModel):
     duplicate: bool = False
     tick: int
     remaining: int
+
+
+class OfferInput(PublicModel):
+    story_goal_id: str = Field(min_length=1, max_length=200)
+    tick: int = Field(ge=1, strict=True)
+    actor_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    target_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    action_type: OfferActionType
+    world_points: int = Field(ge=1, le=3, strict=True)
+    request_id: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class OfferReceipt(PublicModel):
+    accepted: bool = True
+    duplicate: bool = False
+    offer_id: str
+    tick: int
+    remaining: int
+    estimated_price_min: int
+    estimated_price_max: int
 
 
 class TickInput(PublicModel):

@@ -17,6 +17,9 @@ def replay_from(
         llm=ReplayLLM(llm_log) if snapshot.llm_enabled else None,
         tick_minutes=snapshot.show_config.tick_minutes,
         influence_per_tick=snapshot.show_config.influence_per_tick,
+        max_offers_per_viewer=snapshot.show_config.max_offers_per_viewer,
+        max_offer_points_per_goal=snapshot.show_config.max_offer_points_per_goal,
+        offer_policy_version=snapshot.show_config.offer_policy_version,
         show_journal=snapshot.show_journal,
     )
     from glasshouse.scenes.models import SceneStatus

@@ -69,6 +69,27 @@ class VoteRow(Base):
     )
 
 
+class OfferRow(Base):
+    __tablename__ = 'viewer_offers'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    season_id: Mapped[str] = mapped_column(ForeignKey('seasons.id'))
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
+    tick: Mapped[int]
+    goal_id: Mapped[str] = mapped_column(String(200))
+    actor_id: Mapped[str] = mapped_column(String(64))
+    target_id: Mapped[str | None] = mapped_column(String(64))
+    action_type: Mapped[str] = mapped_column(String(40))
+    points: Mapped[int]
+    request_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+    __table_args__ = (
+        CheckConstraint('points >= 1 AND points <= 3'),
+        UniqueConstraint('season_id', 'user_id', 'request_id'),
+        Index('ix_offers_user_tick', 'season_id', 'user_id', 'tick'),
+        Index('ix_offers_goal_tick', 'season_id', 'goal_id', 'tick'),
+    )
+
+
 class Budget(Base):
     __tablename__ = 'viewer_budgets'
     season_id: Mapped[str] = mapped_column(ForeignKey('seasons.id'), primary_key=True)

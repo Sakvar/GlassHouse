@@ -64,6 +64,14 @@ class AgentRef(BaseModel):
 
 class WorldEventType(StrEnum):
     SHOW_ACTION = "show_action"
+    AUDIENCE_OFFER = "audience_offer"
+    DEAL_ACCEPTED = "deal_accepted"
+    DEAL_NEGOTIATED = "deal_negotiated"
+    DEAL_REFUSED = "deal_refused"
+    DEAL_PARTIAL = "deal_partial"
+    DEAL_FULFILLED = "deal_fulfilled"
+    DEAL_BROKEN = "deal_broken"
+    REPUTATION_CHANGED = "reputation_changed"
     MOVE = "move"
     SLEEP = "sleep"
     EAT = "eat"

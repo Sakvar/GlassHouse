@@ -137,6 +137,11 @@ LLM-вызова. Смена языка зрителем не меняет ми�
 | `LLM_MAX_OUTPUT_TOKENS_PER_TICK` | 600; диапазон 64–2000 |
 | `LLM_MAX_INPUT_CHARS` | 12000; контекст длиннее лимита приводит к шаблонному recap |
 | `LLM_TIMEOUT_SECONDS` | 15; диапазон 1–60 |
+| `MAX_OFFERS_PER_VIEWER` | 1 безопасное предложение зрителя на серию |
+| `MAX_OFFER_POINTS_PER_GOAL` | 12; коллективный предел предложения для цели |
+| `OFFER_POLICY_VERSION` | `v1`; фиксируется в snapshot для replay |
+| `ADULT_CONTENT_ENABLED` | `false`; взрослая механика в этой версии запрещена |
+| `PAID_CURRENCY_ENABLED` | `false`; платная валюта в этой версии запрещена |
 
 Не добавляйте `.env` и ключи в git. Для публичного размещения задайте
 `APP_ENV=production`, собственные пароль БД и `SESSION_SECRET`; используйте HTTPS
@@ -160,6 +165,8 @@ OpenAPI: <http://localhost:8000/docs>. Доступны:
 | `GET /public/timeline`, `/public/recaps` | Публичные эпизоды, `page`, `limit`, `from_tick` |
 | `GET /public/session` | CSRF-токен и признак входа, без user id/email |
 | `POST /public/votes` | Голос текущего пользователя с CSRF и idempotency key |
+| `POST /public/offers` | Безопасное предложение для активной цели; не гарантирует согласие |
+| `GET /public/offers/{id}` | Собственная квитанция и оценочный диапазон цены |
 | `GET /health` | Жив ли процесс |
 | `GET /ready` | Доступна ли БД, применена ли миграция, существует ли сезон |
 | `POST /public/dev/ticks` | Только development, вход + CSRF + `expected_revision` |
@@ -212,6 +219,8 @@ APP_ENV=development uvicorn apps.api.debug:app --host 127.0.0.1 --port 8001
 аутентификацию, переводы и рассказчика. `apps/api/` — HTTP-слой и Jinja/CSS/HTMX.
 Миграция 002 добавляет `users`, `seasons`, `show_events`, `viewer_votes`,
 `viewer_budgets`, `public_recaps`, `llm_runs`, `auth_sessions`, `rate_limits`.
+Миграция 003 добавляет append-only `viewer_offers`; предложения и голоса используют
+единый бесплатный бюджет. Решение персонажа сохраняется в `show_events` и snapshot.
 Миграция 001 сохранена с совместимыми типами для SQLite; расширение pgvector для
 используемых float arrays больше не требуется.
 

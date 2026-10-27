@@ -3,12 +3,15 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from glasshouse.agents.models import (
+    AvariceProfile,
     CurrentState,
     Goals,
     Needs,
     Personality,
+    ReputationState,
     SecretFact,
     SocialBoundaries,
+    ViewerRelation,
 )
 from glasshouse.cognition.beliefs import BeliefStore
 from glasshouse.cognition.claims import ClaimStore
@@ -22,6 +25,10 @@ class AgentState(BaseModel):
     id: str
     name: str
     personality: Personality = Field(default_factory=Personality)
+    avarice: AvariceProfile = Field(default_factory=AvariceProfile)
+    reputation: ReputationState = Field(default_factory=ReputationState)
+    viewer_relations: dict[str, ViewerRelation] = Field(default_factory=dict)
+    offer_cooldowns: dict[str, int] = Field(default_factory=dict)
     needs: Needs = Field(default_factory=Needs)
     goals: Goals = Field(default_factory=Goals)
     secrets: tuple[SecretFact, ...] = ()

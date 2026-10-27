@@ -81,7 +81,8 @@ def test_openrouter_url_headers_strict_schema_fallback_and_public_context(caplog
     assert call['max_tokens'] == 600
     context = json.loads(call['messages'][1]['content'])
     assert set(context) == {'participants', 'category', 'outcome', 'relationship_changes',
-                            'locale', 'previous_public_recap', 'approved_copy'}
+                            'locale', 'previous_public_recap', 'approved_copy', 'offer'}
+    assert context['offer'] is None
     assert audit['model_used'] == 'provider/fallback' and audit['cost'] == 0.0004
     assert audit['prompt_tokens'] == 50
     assert 'never-log-this-key' not in caplog.text

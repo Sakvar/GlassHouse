@@ -4,11 +4,15 @@ import hashlib
 from collections import deque
 from typing import TYPE_CHECKING
 
+from glasshouse.agents.models import ViewerRelation
 from glasshouse.cognition.claims import Claim, ClaimPredicate, derive_claim
 from glasshouse.cognition.validator import validate_intent
 from glasshouse.llm.schemas import Intent, IntentType
 from glasshouse.show.models import (
     GoalStatus,
+    OfferActionType,
+    OfferDecision,
+    OfferStatus,
     PublicCharacter,
     PublicSeason,
     PublicTimeline,
@@ -19,8 +23,10 @@ from glasshouse.show.models import (
     StoryGoal,
     StoryResult,
     TimelineItem,
+    ViewerOffer,
     ViewerVote,
 )
+from glasshouse.show.offers import evaluate_offer
 from glasshouse.world.actions import set_activity
 from glasshouse.world.models import Activity, WorldEvent, WorldEventType
 from glasshouse.world.perception import PerceptionLevel
@@ -37,6 +43,25 @@ TITLES = {
     StoryCategory.RECONCILIATION: "Шанс помириться",
 }
 SECRET_ID = "max_unpaid_debt"
+OFFER_TYPES = {
+    StoryCategory.CONVERSATION: (
+        OfferActionType.START_CONVERSATION,
+        OfferActionType.HOUSEHOLD_TASK,
+    ),
+    StoryCategory.ROMANCE_OPPORTUNITY: (OfferActionType.SPEND_TIME,),
+    StoryCategory.REVEAL_SECRET: (
+        OfferActionType.SHARE_KNOWN_FACT,
+        OfferActionType.PUBLIC_STATEMENT,
+    ),
+    StoryCategory.CONFLICT: (
+        OfferActionType.DEESCALATE,
+        OfferActionType.PUBLIC_STATEMENT,
+    ),
+    StoryCategory.RECONCILIATION: (
+        OfferActionType.DEESCALATE,
+        OfferActionType.START_CONVERSATION,
+    ),
+}
 
 
 class PublicShowDirector:
@@ -47,6 +72,7 @@ class PublicShowDirector:
         self._journal: tuple[ShowEvent, ...] = ()
         self._goals: dict[str, StoryGoal] = {}
         self._votes: tuple[tuple[str, ViewerVote], ...] = ()
+        self._offers: tuple[tuple[str, ViewerOffer], ...] = ()
         self._recaps: tuple[Recap, ...] = ()
         for event in journal:
             self._apply(event)
@@ -68,6 +94,10 @@ class PublicShowDirector:
     def active_goals(self) -> tuple[StoryGoal, ...]:
         return tuple(g for g in self.goals if g.status == GoalStatus.ACTIVE)
 
+    @property
+    def offers(self) -> tuple[ViewerOffer, ...]:
+        return tuple(offer for _, offer in self._offers)
+
     def _apply(self, event: ShowEvent) -> None:
         if event.kind in ("goal_opened", "goal_selected", "goal_closed"):
             goal = StoryGoal.model_validate_json(event.data_json)
@@ -78,6 +108,13 @@ class PublicShowDirector:
             goal = self._goals[vote.story_goal_id]
             self._goals[goal.id] = goal.model_copy(
                 update={"votes": goal.votes + vote.influence_points}
+            )
+        elif event.kind == "offer_submitted":
+            offer = ViewerOffer.model_validate_json(event.data_json)
+            self._offers += ((event.id, offer),)
+            goal = self._goals[offer.story_goal_id]
+            self._goals[goal.id] = goal.model_copy(
+                update={"offer_points": goal.offer_points + offer.world_points}
             )
         elif event.kind == "recap":
             self._recaps += (Recap.model_validate_json(event.data_json),)
@@ -113,6 +150,11 @@ class PublicShowDirector:
                 for _, v in self._votes
                 if v.viewer_id == vote.viewer_id and v.tick == vote.tick
             )
+            spent += sum(
+                offer.world_points
+                for _, offer in self._offers
+                if offer.viewer_id == vote.viewer_id and offer.tick == vote.tick
+            )
             if spent + vote.influence_points > self.engine.show_config.influence_per_tick:
                 raise ValueError("Превышен лимит бесплатного влияния на тик")
             opened = next(
@@ -122,6 +164,56 @@ class PublicShowDirector:
                 and StoryGoal.model_validate_json(e.data_json).id == goal.id
             )
             return self._record("vote_cast", vote, "viewer", (opened,))
+
+    def offer(self, offer: ViewerOffer) -> ShowEvent:
+        with self.engine.lock:
+            goal = self._goals.get(offer.story_goal_id)
+            if goal is None:
+                raise KeyError(offer.story_goal_id)
+            if (
+                goal.status != GoalStatus.ACTIVE
+                or offer.tick != self.engine.world.tick + 1
+                or goal.tick != offer.tick
+            ):
+                raise ValueError("Предложения для этой цели закрыты")
+            if offer.actor_id not in goal.eligible_characters:
+                raise ValueError("Персонаж не участвует в этой цели")
+            if offer.target_id is not None and offer.target_id not in goal.eligible_characters:
+                raise ValueError("Цель действия не участвует в этой сцене")
+            if offer.target_id == offer.actor_id:
+                raise ValueError("Персонаж не может быть собственной целью")
+            if offer.action_type not in goal.allowed_offer_types:
+                raise ValueError("Действие недоступно для этой цели")
+            count = sum(
+                1
+                for _, item in self._offers
+                if item.viewer_id == offer.viewer_id and item.tick == offer.tick
+            )
+            if count >= self.engine.show_config.max_offers_per_viewer:
+                raise ValueError("Лимит предложений на тик исчерпан")
+            spent = sum(
+                vote.influence_points
+                for _, vote in self._votes
+                if vote.viewer_id == offer.viewer_id and vote.tick == offer.tick
+            ) + sum(
+                item.world_points
+                for _, item in self._offers
+                if item.viewer_id == offer.viewer_id and item.tick == offer.tick
+            )
+            if spent + offer.world_points > self.engine.show_config.influence_per_tick:
+                raise ValueError("Превышен лимит бесплатного влияния на тик")
+            if (
+                goal.offer_points + offer.world_points
+                > self.engine.show_config.max_offer_points_per_goal
+            ):
+                raise ValueError("Лимит предложений для цели исчерпан")
+            opened = next(
+                event.id
+                for event in self._journal
+                if event.kind == "goal_opened"
+                and StoryGoal.model_validate_json(event.data_json).id == goal.id
+            )
+            return self._record("offer_submitted", offer, "viewer", (opened,))
 
     def _tie_key(self, value: str, tick: int) -> str:
         return hashlib.sha256(f"{self.engine.seed}:{tick}:{value}".encode()).hexdigest()
@@ -211,6 +303,7 @@ class PublicShowDirector:
                 tick=tick,
                 eligible_characters=(a, b),
                 director_score=self._score(category, a, b),
+                allowed_offer_types=OFFER_TYPES[category],
             )
             self._record("goal_opened", goal)
 
@@ -218,10 +311,13 @@ class PublicShowDirector:
         active = [g for g in self.active_goals() if g.tick == self.engine.world.tick]
         if not active:
             return None
-        voted = any(g.votes for g in active)
+        voted = any(g.votes or g.offer_points for g in active)
         winner = max(
             active,
-            key=lambda g: (g.votes if voted else g.director_score, self._tie_key(g.id, g.tick)),
+            key=lambda g: (
+                g.votes + g.offer_points if voted else g.director_score,
+                self._tie_key(g.id, g.tick),
+            ),
         )
         # All ballots in this round explain selection, including those for losing goals.
         causes = [eid for eid, v in self._votes if v.tick == winner.tick]
@@ -240,6 +336,38 @@ class PublicShowDirector:
                     cause_ids=(selection.id,),
                 )
         return selected
+
+    def _offer_decision(self, goal: StoryGoal) -> OfferDecision | None:
+        candidates = [item for _, item in self._offers if item.story_goal_id == goal.id]
+        if not candidates:
+            return None
+        groups: dict[tuple, list[ViewerOffer]] = {}
+        for item in candidates:
+            key = (item.action_type, item.actor_id, item.target_id)
+            groups.setdefault(key, []).append(item)
+        offers = tuple(
+            max(
+                groups.values(),
+                key=lambda items: (
+                    sum(item.world_points for item in items),
+                    self._tie_key(":".join(sorted(item.id for item in items)), goal.tick),
+                ),
+            )
+        )
+        decision = evaluate_offer(
+            actor=self.engine.agents[offers[0].actor_id],
+            offers=offers,
+            seed=self.engine.seed,
+            tick=goal.tick,
+            hard_refusal=self._refusal(goal),
+        )
+        causes = tuple(
+            event_id
+            for event_id, item in self._offers
+            if item.id in decision.offer_ids
+        )
+        self._record("offer_resolved", decision, "offer-policy:v1", causes)
+        return decision
 
     def _append_world(self, event: WorldEvent) -> WorldEvent:
         world = self.engine.world
@@ -383,7 +511,55 @@ class PublicShowDirector:
         a, b = engine.agents[aid], engine.agents[bid]
         changes = []
         secrets = ()
+        offer_decision = self._offer_decision(goal)
+        if offer_decision:
+            rewarded = engine.agents[offer_decision.actor_id]
+            accepted = offer_decision.status in {
+                OfferStatus.ACCEPTED,
+                OfferStatus.ALTERNATIVE,
+                OfferStatus.PARTIAL,
+            }
+            viewer_keys = {
+                item.viewer_id
+                for _, item in self._offers
+                if item.id in offer_decision.offer_ids
+            }
+            for viewer_key in sorted(viewer_keys):
+                relation = rewarded.viewer_relations.setdefault(viewer_key, ViewerRelation())
+                relation.last_interaction_tick = engine.world.tick
+                if accepted:
+                    relation.accepted_count += 1
+                    relation.trust = min(100, relation.trust + 2)
+                    relation.reliability = min(100, relation.reliability + 1)
+                else:
+                    relation.rejected_count += 1
+                    if offer_decision.reason in {"voluntary_refusal", "price_not_met"}:
+                        relation.resentment = min(100, relation.resentment + 1)
+            self._append_world(
+                WorldEvent(
+                    id="pending",
+                    tick=engine.world.tick,
+                    type=WorldEventType.AUDIENCE_OFFER,
+                    actor=offer_decision.actor_id,
+                    target=offer_decision.target_id,
+                    location=engine.agents[offer_decision.actor_id].ref.location_id,
+                    payload={
+                        "source": "offer-policy:v1",
+                        "story_goal_id": goal.id,
+                        "action_type": offer_decision.action_type.value,
+                        "offered_points": offer_decision.offered_points,
+                        "decision": offer_decision.status.value,
+                        "exact_text": "Зрители предложили безопасный вариант развития сцены.",
+                        "volume": 1.0,
+                    },
+                )
+            )
         reason = self._refusal(goal)
+        if offer_decision and offer_decision.status in {
+            OfferStatus.REFUSED,
+            OfferStatus.NEGOTIATING,
+        }:
+            reason = offer_decision.reason
         if reason:
             outcome = "refusal"
             text = (
@@ -399,6 +575,11 @@ class PublicShowDirector:
         else:
             reason = "mutual_choice"
             category = goal.category
+            if offer_decision and offer_decision.status in {
+                OfferStatus.ALTERNATIVE,
+                OfferStatus.PARTIAL,
+            }:
+                category = StoryCategory.CONVERSATION
             outcome, text = "conversation", f"{a.name} и {b.name} поговорили о жизни на вилле."
             dimensions = [("trust", 5), ("affinity", 4)]
             if category == StoryCategory.ROMANCE_OPPORTUNITY:
@@ -428,6 +609,44 @@ class PublicShowDirector:
             for actor, target in ((aid, bid), (bid, aid)):
                 for dimension, delta in dimensions:
                     changes.append(self._change(actor, target, dimension, delta))
+            if offer_decision:
+                rewarded = engine.agents[offer_decision.actor_id]
+                day = engine.world.sim_time[:10]
+                if rewarded.avarice.benefit_day != day:
+                    rewarded.avarice.benefit_day = day
+                    rewarded.avarice.accumulated_benefit = 0
+                benefit = min(
+                    offer_decision.offered_points,
+                    rewarded.avarice.max_daily_benefit - rewarded.avarice.accumulated_benefit,
+                )
+                rewarded.avarice.accumulated_benefit += max(0, benefit)
+                rewarded.avarice.accepted_offer_count += 1
+                rewarded.avarice.price_memory[offer_decision.action_type.value] = max(
+                    offer_decision.quoted_price,
+                    rewarded.avarice.price_memory.get(offer_decision.action_type.value, 0),
+                )
+                rewarded.reputation.promises_kept += 1
+                rewarded.reputation.public_reliability = min(
+                    100, rewarded.reputation.public_reliability + 1
+                )
+                self._append_world(
+                    WorldEvent(
+                        id="pending",
+                        tick=engine.world.tick,
+                        type=WorldEventType.DEAL_FULFILLED,
+                        actor=offer_decision.actor_id,
+                        target=offer_decision.target_id,
+                        location=rewarded.ref.location_id,
+                        payload={
+                            "source": "offer-policy:v1",
+                            "story_goal_id": goal.id,
+                            "action_type": offer_decision.action_type.value,
+                            "points": benefit,
+                            "exact_text": "Персонаж выполнил принятое предложение.",
+                            "volume": 1.0,
+                        },
+                    )
+                )
         # Needs/fatigue evolve without LLM calls; logged values explain future decisions.
         needs_after = {}
         for person in engine.agents.values():
@@ -459,6 +678,7 @@ class PublicShowDirector:
             text=text,
             relationship_changes=tuple(changes),
             revealed_secret_ids=secrets,
+            offer_decision=offer_decision,
         )
         event = self._append_world(
             WorldEvent(
@@ -475,6 +695,9 @@ class PublicShowDirector:
                     "exact_text": text,
                     "result": result.model_dump(mode="json"),
                     "needs_after": needs_after,
+                    "offer_decision": (
+                        offer_decision.model_dump(mode="json") if offer_decision else None
+                    ),
                 },
             )
         )

@@ -141,6 +141,17 @@ STRINGS = {
         "offline": "Связь прервалась. Попробуйте ещё раз.",
         "saved": "Сохранено",
         "voted": "Голос принят. Следующая серия покажет результат.",
+        "offer": "Предложить",
+        "offered": "Предложение принято системой. Персонаж всё ещё может отказаться.",
+        "offer_rules": "Предложение создаёт возможность, но не покупает согласие.",
+        "offer_actions": {
+            "start_conversation": "Начать разговор",
+            "household_task": "Бытовое поручение",
+            "public_statement": "Публичное заявление",
+            "spend_time": "Провести время вместе",
+            "deescalate": "Снизить конфликт",
+            "share_known_fact": "Поделиться известным фактом",
+        },
         "footer": "AI-реалити • Бесплатное влияние • Без ставок и платежей",
         "teaser": "Как изменится разговор в следующей серии? Выберите новую возможность.",
         "back": "Вернуться в эфир",
@@ -191,6 +202,17 @@ STRINGS = {
         "offline": "Connection interrupted. Please try again.",
         "saved": "Saved",
         "voted": "Vote accepted. The next episode will reveal the outcome.",
+        "offer": "Make offer",
+        "offered": "The offer was recorded. The character may still refuse.",
+        "offer_rules": "An offer creates an opportunity; it never buys consent.",
+        "offer_actions": {
+            "start_conversation": "Start a conversation",
+            "household_task": "Household task",
+            "public_statement": "Public statement",
+            "spend_time": "Spend time together",
+            "deescalate": "De-escalate conflict",
+            "share_known_fact": "Share a known fact",
+        },
         "footer": "AI reality show • Free influence • No betting or payments",
         "teaser": "What will the next conversation bring? Choose a new opportunity.",
         "back": "Back to the show",
@@ -273,6 +295,8 @@ def goal_view(goal, locale):
         status=goal.status.value,
         tick=goal.tick,
         votes=goal.votes,
+        offer_points=goal.offer_points,
+        allowed_offer_types=goal.allowed_offer_types,
         eligible_characters=goal.eligible_characters,
         locale=locale,
     )
@@ -283,6 +307,7 @@ def episode_view(engine, locale):
     goal = next((g for g in engine.show.goals if g.id == recap.story_goal_id), None)
     participants = goal.eligible_characters if goal else ()
     outcome = goal.result.outcome if goal and goal.result else "rest"
+    offer = goal.result.offer_decision if goal and goal.result else None
     pair = (" и " if locale == "ru" else " and ").join(NAMES[locale][x] for x in participants)
     headline, happened, why = OUTCOMES[locale][outcome]
     return Episode(
@@ -297,6 +322,10 @@ def episode_view(engine, locale):
         relationship_changes=[c.model_dump() for c in recap.relationship_changes],
         sim_time=recap.sim_time,
         story_goal_id=recap.story_goal_id,
+        offer_status=offer.status.value if offer else None,
+        offer_action=offer.action_type.value if offer else None,
+        offer_points=offer.offered_points if offer else None,
+        offer_price=offer.quoted_price if offer else None,
     )
 
 

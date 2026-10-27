@@ -13,6 +13,44 @@ class Personality(BaseModel):
     competitiveness: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class AvariceProfile(BaseModel):
+    """Stable preferences plus the mutable history used to price audience offers."""
+
+    material_drive: float = Field(default=0.5, ge=0.0, le=1.0)
+    reward_salience: float = Field(default=0.5, ge=0.0, le=1.0)
+    status_drive: float = Field(default=0.5, ge=0.0, le=1.0)
+    autonomy: float = Field(default=0.5, ge=0.0, le=1.0)
+    moral_cost_sensitivity: float = Field(default=0.5, ge=0.0, le=1.0)
+    reputation_sensitivity: float = Field(default=0.5, ge=0.0, le=1.0)
+    bargain_tendency: float = Field(default=0.5, ge=0.0, le=1.0)
+    retaliation_tendency: float = Field(default=0.5, ge=0.0, le=1.0)
+    trust_reward_multiplier: float = Field(default=1.0, ge=0.0, le=2.0)
+    base_refusal_chance: float = Field(default=0.35, ge=0.0, le=1.0)
+    max_daily_benefit: int = Field(default=5, ge=0, le=100)
+    accumulated_benefit: int = Field(default=0, ge=0)
+    benefit_day: str = ""
+    accepted_offer_count: int = Field(default=0, ge=0)
+    broken_promise_count: int = Field(default=0, ge=0)
+    price_memory: dict[str, int] = Field(default_factory=dict)
+
+
+class ViewerRelation(BaseModel):
+    trust: float = Field(default=0.0, ge=-100.0, le=100.0)
+    affinity: float = Field(default=0.0, ge=-100.0, le=100.0)
+    resentment: float = Field(default=0.0, ge=0.0, le=100.0)
+    reliability: float = Field(default=0.0, ge=-100.0, le=100.0)
+    last_interaction_tick: int = Field(default=0, ge=0)
+    accepted_count: int = Field(default=0, ge=0)
+    rejected_count: int = Field(default=0, ge=0)
+
+
+class ReputationState(BaseModel):
+    public_reliability: float = Field(default=50.0, ge=0.0, le=100.0)
+    audience_respect: float = Field(default=50.0, ge=0.0, le=100.0)
+    promises_kept: int = Field(default=0, ge=0)
+    promises_broken: int = Field(default=0, ge=0)
+
+
 class Needs(BaseModel):
     social: float = Field(default=0.5, ge=0.0, le=1.0)
     romantic: float = Field(default=0.5, ge=0.0, le=1.0)
